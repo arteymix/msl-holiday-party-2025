@@ -1,12 +1,24 @@
+import os
 import random
+import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import math
 
-NUM_PARTICIPANTS = 300
-NUM_TABLES = 30
-NUM_PARTICIPANTS_PER_TABLE = 300
+# debug mode will display extra information on the cards
+DEBUG = False
+
+NUM_TABLES = 29
+NUM_PARTICIPANTS_PER_TABLE = 9
+NUM_PARTICIPANTS = NUM_TABLES * NUM_PARTICIPANTS_PER_TABLE
+if (NUM_PARTICIPANTS % 4) != 0:
+    print('Removing ' + str(
+        (NUM_PARTICIPANTS % 4)) + ' participants to make the total number of participants divisible by 4')
+    NUM_PARTICIPANTS = NUM_PARTICIPANTS - (NUM_PARTICIPANTS % 4)  # make it divisible by 4
+
+print('Number of participants: ' + str(NUM_PARTICIPANTS))
 
 # the number of columns/rows to fit on a letter paper
 TEMPLATE_COLUMNS = 4
@@ -81,17 +93,19 @@ def generate_card(card_model: Card, **kwargs) -> ET.Element:
     y2 = y0 - HEIGHT
     SubElement(card, 'path', d=f'M {x0} {y0} L {x1} {y1} L {x2} {y2} Z', fill='white')
 
-    SubElement(card, 'text', x=WIDTH / 2, y=5, font_size=2,
-               text_anchor='middle', dominant_baseline='middle', fill='black').text = str(card_model.table_number)
     SubElement(card, 'text', x=WIDTH / 2, y=2 * HEIGHT / 3, font_size=BIG_NUMBER_FONT_SIZE,
                text_anchor='middle', dominant_baseline='middle', fill='black').text = str(
-        card_model.target_table_number)
-    # SubElement(card, 'text', x=WIDTH / 2, y=2 * HEIGHT / 3 + 14, font_size=6,
-    #           text_anchor='middle', dominant_baseline='middle', fill='black').text = 'MSL 2025 Holiday Party'
+        card_model.target_table_number + 1)
+    if DEBUG:
+        SubElement(card, 'text', x=WIDTH / 2 - 17, y=2 * HEIGHT / 3, font_size=8,
+                   text_anchor='middle', dominant_baseline='middle', fill='black').text = str(
+            card_model.card_number + 1)
+        SubElement(card, 'text', x=WIDTH / 2 + 18, y=2 * HEIGHT / 3, font_size=8,
+                   text_anchor='middle', dominant_baseline='middle', fill='black').text = str(
+            card_model.table_number + 1)
 
     # generate the bottom row
     for i, letter in enumerate(a):
-        # TODO: trace the path of each sub-triangles and color them
         x0 = i * SIDE_WIDTH
         y0 = HEIGHT
         x1 = x0 + SIDE_WIDTH
@@ -119,15 +133,6 @@ def generate_card(card_model: Card, **kwargs) -> ET.Element:
                    y=HEIGHT - (i * SIDE_HEIGHT) - (SIDE_HEIGHT / 2) + HEIGHT_ADJUSTMENT,
                    font_size=CODE_FONT_SIZE,
                    text_anchor='middle', dominant_baseline='middle', fill='black').text = letter
-
-        # x0 = WIDTH - (i * SIDE_WIDTH) - (SIDE_WIDTH / 2)
-        # y0 = HEIGHT - (i * SIDE_HEIGHT) - SIDE_HEIGHT
-        # x1 = WIDTH - (SIDE_WIDTH / 2)
-        # y1 = y0 - SIDE_HEIGHT
-        # x2 = WIDTH - ((i + 1) * (SIDE_WIDTH / 2))
-        # y2 = HEIGHT - (i * SIDE_HEIGHT)
-        # SubElement(card, 'path', d=f'M {x0} {y0} L {x1} {y1} L {x2} {y2} Z',
-        #           fill_opacity=0, stroke='black', stroke_width=1)
 
     # generate the left side of the triangle
     for i, letter in enumerate(c):
@@ -177,33 +182,47 @@ def generate_sequences_triplet():
     c += a[0]
     return a, b, c
 
-def generate_cards_quadruplet(card_number):
+def generate_cards_quadruplet(card_number, from_tables, to_tables):
     a, b, c = generate_sequences_triplet()
     d, e, f = generate_sequences_triplet()
     d = c[0] + d[1:-1] + a[-1]
     e = a[-1] + e[1:-1] + c[-1]
     f = e[0] + f[1:-1] + a[-1]
-
     return [
-        Card(card_number, generate_random_table(), generate_random_table(), (a, b, c)),
-        Card(card_number + 1, generate_random_table(), generate_random_table(), (c[::-1], d, e)),
-        Card(card_number + 2, generate_random_table(), generate_random_table(), (e[::-1], f, a[::-1])),
-        Card(card_number + 3, generate_random_table(), generate_random_table(), (f[::-1], d[::-1], b[::-1]))
+        Card(card_number, from_tables[card_number], to_tables[card_number], (a, b, c)),
+        Card(card_number + 1, from_tables[card_number + 1], to_tables[card_number + 1], (c[::-1], d, e)),
+        Card(card_number + 2, from_tables[card_number + 2], to_tables[card_number + 2], (e[::-1], f, a[::-1])),
+        Card(card_number + 3, from_tables[card_number + 3], to_tables[card_number + 3], (f[::-1], d[::-1], b[::-1]))
     ]
 
+def generate_table_numbers():
+    return [i // NUM_PARTICIPANTS_PER_TABLE for i in range(NUM_PARTICIPANTS)]
+
 def generate_cards():
+    from_tables = list(generate_table_numbers())
+    random.shuffle(from_tables)
+    to_tables = list(generate_table_numbers())
+    random.shuffle(to_tables)
     assert NUM_PARTICIPANTS % 4 == 0
+    cards = []
     for card_number in range(NUM_PARTICIPANTS // 4):
-        yield from generate_cards_quadruplet(card_number)
+        cards.extend(generate_cards_quadruplet(4 * card_number, from_tables, to_tables))
+    random.shuffle(cards)
+    return cards
 
 NUM_CARDS_PER_TEMPLATE = TEMPLATE_COLUMNS * TEMPLATE_ROWS
 
 def main():
-    cards = list(generate_cards())
-    for batch_id, chunk in enumerate(cards[::NUM_CARDS_PER_TEMPLATE]):
+    random.seed(123)
+    cards = generate_cards()
+    shutil.rmtree('templates')
+    os.makedirs('templates', exist_ok=True)
+    for batch_id in range(0, math.ceil(len(cards) / NUM_CARDS_PER_TEMPLATE)):
+        out = 'templates/Template #' + str(batch_id + 1) + '.svg'
         (ET.ElementTree(
             generate_template(cards[batch_id * NUM_CARDS_PER_TEMPLATE: (batch_id + 1) * NUM_CARDS_PER_TEMPLATE]))
-         .write('templates/Template #' + str(batch_id) + '.svg'))
+         .write(out))
+        subprocess.run(['rsvg-convert', '-f', 'pdf', out, '-o', 'templates/Template #' + str(batch_id + 1) + '.pdf'])
 
 if __name__ == '__main__':
     main()
