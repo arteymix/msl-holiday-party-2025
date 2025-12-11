@@ -291,7 +291,9 @@ def main():
             f.write('\t'.join([str(c.card_number + 1) for c in cards[i:i + 4]]) + '\n')
     if not DEBUG:
         cards = sorted(cards, key=lambda card: card.card_number)
-    shutil.rmtree('templates')
+    if os.path.exists('templates'):
+        print('Removing existing templates/ directory...')
+        shutil.rmtree('templates')
     os.makedirs('templates', exist_ok=True)
     front = []
     back = []
